@@ -563,7 +563,116 @@ function App() {
           </>
         )}
 
-        {!["Dashboard", "Farmers", "Crop Batches", "Collection Centres", "Distributors", "Retailers"].includes(activePage) && (
+        {/* CONSUMER TRACKING */}
+
+        {activePage === "Track Products" && (
+          <section className="content-card">
+            <h2>Track Your Agricultural Product</h2>
+
+            <p className="card-subtitle">
+              Enter your batch ID to view its complete journey.
+            </p>
+
+            <div className="tracking-search">
+              <input
+                className="search-input"
+                placeholder="Example: RICE-001"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            {search.trim() !== "" && (() => {
+              const batch = batches.find(
+                b => b.id.toLowerCase() === search.trim().toLowerCase()
+              );
+
+              if (!batch) {
+                return (
+                  <p className="empty-message">
+                    No batch found. Please check your Batch ID.
+                  </p>
+                );
+              }
+
+              const stages = [
+                {
+                  name: "Farmer Registration",
+                  detail: `${batch.farmer} · ${batch.location}`,
+                  done: true,
+                },
+                {
+                  name: "Collection Centre",
+                  detail: "Crop received and inspected",
+                  done: ["Received", "In Transit", "Delivered"].includes(batch.status),
+                },
+                {
+                  name: "Distributor",
+                  detail: "Shipment dispatched",
+                  done: ["In Transit", "Delivered"].includes(batch.status),
+                },
+                {
+                  name: "Retailer",
+                  detail: "Product delivered to retailer",
+                  done: batch.status === "Delivered",
+                },
+              ];
+
+              return (
+                <div className="tracking-result">
+                  <div className="tracking-header">
+                    <div>
+                      <h2>{batch.crop}</h2>
+                      <p>Batch ID: {batch.id}</p>
+                    </div>
+
+                    <span className={`badge ${batch.status.toLowerCase().replace(" ", "-")}`}>
+                      {batch.status}
+                    </span>
+                  </div>
+
+                  <div className="product-details">
+                    <div><small>Farmer</small><strong>{batch.farmer}</strong></div>
+                    <div><small>Quantity</small><strong>{batch.quantity}</strong></div>
+                    <div><small>Origin</small><strong>{batch.location}</strong></div>
+                  </div>
+
+                  <h3>Supply Chain Journey</h3>
+
+                  <div className="tracking-timeline">
+                    {stages.map((stage, index) => (
+                      <div className="timeline-item" key={stage.name}>
+                        <div className={`timeline-marker ${stage.done ? "completed" : ""}`}>
+                          {stage.done ? "✓" : index + 1}
+                        </div>
+                        <div>
+                          <strong>{stage.name}</strong>
+                          <p>{stage.detail}</p>
+                          <small>{stage.done ? "Completed" : "Pending"}</small>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="verification-note">
+                    This tracking information is currently retrieved from
+                    the application's demonstration data.
+                  </p>
+                </div>
+              );
+            })()}
+          </section>
+        )}
+
+        {![
+          "Dashboard",
+          "Farmers",
+          "Crop Batches",
+          "Collection Centres",
+          "Distributors",
+          "Retailers",
+          "Track Products"
+        ].includes(activePage) && (
           <section className="content-card placeholder">
             <h2>{activePage}</h2>
             <p>This module will be implemented next.</p>
