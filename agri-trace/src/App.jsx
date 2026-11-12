@@ -1,6 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
+import {
+  registerBatch,
+  getBatch,
+  updateBatchStatus,
+  getBatchHistory
+} from "./blockchain";
 
 function App() {
   const [activePage, setActivePage] = useState("Dashboard");
@@ -8,6 +14,71 @@ function App() {
  const [search, setSearch] = useState(
   () => new URLSearchParams(window.location.search).get("batch") || ""
 );
+  const [trackedBatch, setTrackedBatch] = useState(null);
+  const [trackingHistory, setTrackingHistory] = useState([]);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState("");
+
+  useEffect(() => {
+    const id = search.trim();
+
+    if (!id) {
+      setTrackedBatch(null);
+      setTrackingHistory([]);
+      setTrackingError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadBlockchainBatch() {
+      setTrackingLoading(true);
+      setTrackingError("");
+
+      try {
+        const batch = await getBatch(id);
+
+        if (!batch.exists) {
+          throw new Error("Batch not found");
+        }
+
+        const history = await getBatchHistory(id);
+
+        if (!cancelled) {
+          setTrackedBatch({
+            id: batch.batchId,
+            crop: batch.cropName,
+            farmer: batch.farmerName,
+            quantity: `${batch.quantity.toString()} kg`,
+            location: batch.origin,
+            status: Number(batch.currentStatus),
+          });
+
+          setTrackingHistory(history);
+        }
+      } catch (error) {
+        console.error("Blockchain tracking error:", error);
+
+        if (!cancelled) {
+          setTrackedBatch(null);
+          setTrackingHistory([]);
+          setTrackingError(
+            "Batch not found on blockchain. Check the Batch ID."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setTrackingLoading(false);
+        }
+      }
+    }
+
+    loadBlockchainBatch();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [search]);
 
   const [farmers, setFarmers] = useState([
     {
@@ -126,49 +197,171 @@ function App() {
     setShowForm(false);
   }
 
-  function handleBatchSubmit(e) {
+  async function handleBatchSubmit(e) {
     e.preventDefault();
 
-    const newBatch = {
-      id: `${batchForm.crop.toUpperCase()}-${String(batches.length + 1).padStart(3, "0")}`,
-      crop: batchForm.crop,
-      farmer: batchForm.farmer,
-      quantity: `${batchForm.quantity} kg`,
-      location: batchForm.location,
-      status: "Registered",
-    };
+    try {
+      const newBatch = {
+        id: `${batchForm.crop.toUpperCase()}-${String(batches.length + 1).padStart(3, "0")}`,
+        crop: batchForm.crop,
+        farmer: batchForm.farmer,
+        quantity: `${batchForm.quantity} kg`,
+        location: batchForm.location,
+        status: "Registered",
+      };
 
-    setBatches([...batches, newBatch]);
+      // Store batch on blockchain
+      const receipt = await registerBatch(
+        newBatch.id,
+        newBatch.crop,
+        newBatch.farmer,
+        Number(batchForm.quantity),
+        newBatch.location
+      );
 
-    setBatchForm({
-      crop: "",
-      farmer: "",
-      quantity: "",
-      location: "",
-    });
+      // Update React UI only after blockchain confirmation
+      setBatches([...batches, newBatch]);
 
-    setShowForm(false);
-    setActivePage("Dashboard");
+      console.log("Blockchain transaction:", receipt.hash);
+
+      setBatchForm({
+        crop: "",
+        farmer: "",
+        quantity: "",
+        location: "",
+      });
+
+      setShowForm(false);
+      setActivePage("Dashboard");
+
+      alert("Batch successfully registered on blockchain!");
+    } catch (error) {
+      console.error("Blockchain registration failed:", error);
+      alert("Registration failed. Check blockchain connection.");
+    }
   }
 
-  function receiveBatch(batchId) {
-    setBatches(
-      batches.map((batch) =>
-        batch.id === batchId
-          ? { ...batch, status: "Received" }
-          : batch
-      )
-    );
+  async function receiveBatch(batchId) {
+    try {
+      // Status 1 = ReceivedAtCollection
+      const receipt = await updateBatchStatus(batchId, 1);
+
+      // Update UI after blockchain confirmation
+      setBatches((previousBatches) =>
+        previousBatches.map((batch) =>
+          batch.id === batchId
+            ? { ...batch, status: "Received at Collection" }
+            : batch
+        )
+      );
+
+      console.log("Receipt transaction:", receipt.hash);
+      alert("Collection centre receipt recorded on blockchain!");
+    } catch (error) {
+      console.error("Receipt update failed:", error);
+      alert("Could not update status. Check the batch's current blockchain status.");
+    }
   }
 
-  function dispatchBatch(batchId) {
-    setBatches(
-      batches.map((batch) =>
-        batch.id === batchId
-          ? { ...batch, status: "In Transit" }
-          : batch
-      )
-    );
+  async function dispatchBatch(batchId) {
+    try {
+      // Status 2 = InTransitToDistributor
+      const receipt = await updateBatchStatus(batchId, 2);
+
+      setBatches((previousBatches) =>
+        previousBatches.map((batch) =>
+          batch.id === batchId
+            ? { ...batch, status: "In Transit to Distributor" }
+            : batch
+        )
+      );
+
+      console.log("Dispatch transaction:", receipt.hash);
+      alert("Shipment recorded on blockchain!");
+    } catch (error) {
+      console.error("Dispatch failed:", error);
+      alert("Dispatch failed. Check the batch status.");
+    }
+  }
+
+  async function receiveAtDistributor(batchId) {
+    try {
+      const receipt = await updateBatchStatus(batchId, 3);
+
+      setBatches((previousBatches) =>
+        previousBatches.map((batch) =>
+          batch.id === batchId
+            ? { ...batch, status: "Received at Distributor" }
+            : batch
+        )
+      );
+
+      console.log("Distributor receipt:", receipt.hash);
+      alert("Distributor receipt recorded on blockchain!");
+    } catch (error) {
+      console.error(error);
+      alert("Could not confirm distributor receipt.");
+    }
+  }
+
+  async function dispatchToRetailer(batchId) {
+    try {
+      const receipt = await updateBatchStatus(batchId, 4);
+
+      setBatches((previousBatches) =>
+        previousBatches.map((batch) =>
+          batch.id === batchId
+            ? { ...batch, status: "In Transit to Retailer" }
+            : batch
+        )
+      );
+
+      console.log("Retailer dispatch:", receipt.hash);
+      alert("Retailer shipment recorded on blockchain!");
+    } catch (error) {
+      console.error(error);
+      alert("Could not dispatch to retailer.");
+    }
+  }
+
+  async function receiveAtRetailer(batchId) {
+    try {
+      const receipt = await updateBatchStatus(batchId, 5);
+
+      setBatches((previousBatches) =>
+        previousBatches.map((batch) =>
+          batch.id === batchId
+            ? { ...batch, status: "Received at Retailer" }
+            : batch
+        )
+      );
+
+      console.log("Retailer receipt:", receipt.hash);
+      alert("Retailer receipt recorded on blockchain!");
+    } catch (error) {
+      console.error(error);
+      alert("Could not confirm retailer receipt.");
+    }
+  }
+
+  async function deliverToConsumer(batchId) {
+    try {
+      const receipt = await updateBatchStatus(batchId, 6);
+
+      setBatches((previousBatches) =>
+        previousBatches.map((batch) =>
+          batch.id === batchId
+            ? { ...batch, status: "Delivered to Consumer" }
+            : batch
+        )
+      );
+
+      console.log("Consumer delivery:", receipt.hash);
+      alert("Final delivery recorded on blockchain!");
+    } catch (error) {
+      console.error(error);
+      alert("Could not confirm final delivery.");
+    }
   }
 
   function confirmDelivery(batchId) {
@@ -545,6 +738,94 @@ function App() {
                 <h2>{distributors.length}</h2>
                 <p>Registered distributors</p>
               </div>
+              <div className="stat-card">
+                <div className="stat-top">
+                  <span>Awaiting Dispatch</span>
+                  <span>📦</span>
+                </div>
+                <h2>
+                  {batches.filter(b => b.status === "Received at Collection").length}
+                </h2>
+                <p>Ready for transportation</p>
+              </div>
+            </section>
+
+            <section className="content-card">
+              <h2>Distributor Directory</h2>
+              <div className="centre-grid">
+                {distributors.map(distributor => (
+                  <div className="centre-card" key={distributor.id}>
+                    <h3>🚚 {distributor.name}</h3>
+                    <p>Distributor ID: {distributor.id}</p>
+                    <p>Location: {distributor.location}</p>
+                    <p>Manager: {distributor.manager}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="content-card">
+              <h2>Incoming Shipments</h2>
+              <p className="card-subtitle">
+                Dispatch batches received from collection centres.
+              </p>
+
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Batch ID</th>
+                      <th>Crop</th>
+                      <th>Farmer</th>
+                      <th>Quantity</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {batches.map(batch => (
+                      <tr key={batch.id}>
+                        <td className="batch-id">{batch.id}</td>
+                        <td>{batch.crop}</td>
+                        <td>{batch.farmer}</td>
+                        <td>{batch.quantity}</td>
+                        <td>
+                          <span className="badge">
+                            {batch.status}
+                          </span>
+                        </td>
+                        <td>
+                          {batch.status === "Received at Collection" ? (
+                            <button
+                              className="primary-button"
+                              onClick={() => dispatchBatch(batch.id)}
+                            >
+                              Dispatch
+                            </button>
+                          ) : batch.status === "In Transit to Distributor" ? (
+                            <button
+                              className="primary-button"
+                              onClick={() => receiveAtDistributor(batch.id)}
+                            >
+                              Confirm Arrival
+                            </button>
+                          ) : batch.status === "Received at Distributor" ? (
+                            <button
+                              className="primary-button"
+                              onClick={() => dispatchToRetailer(batch.id)}
+                            >
+                              Dispatch to Retailer
+                            </button>
+                          ) : (
+                            <span>Waiting / Completed</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         )}
@@ -561,6 +842,85 @@ function App() {
                 </div>
                 <h2>{retailers.length}</h2>
                 <p>Registered retailers</p>
+              </div>
+              <div className="stat-card">
+                <div className="stat-top">
+                  <span>Incoming Shipments</span>
+                  <span>📦</span>
+                </div>
+                <h2>
+                  {batches.filter(
+                    b => b.status === "In Transit to Retailer"
+                  ).length}
+                </h2>
+                <p>Awaiting retailer receipt</p>
+              </div>
+            </section>
+
+            <section className="content-card">
+              <h2>Registered Retailers</h2>
+              <div className="centre-grid">
+                {retailers.map(retailer => (
+                  <div className="centre-card" key={retailer.id}>
+                    <h3>🏪 {retailer.name}</h3>
+                    <p>Retailer ID: {retailer.id}</p>
+                    <p>Location: {retailer.location}</p>
+                    <p>Manager: {retailer.manager}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="content-card">
+              <h2>Retailer Shipments</h2>
+              <p className="card-subtitle">
+                Receive incoming shipments and confirm consumer delivery.
+              </p>
+
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Batch ID</th>
+                      <th>Crop</th>
+                      <th>Farmer</th>
+                      <th>Quantity</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {batches.map(batch => (
+                      <tr key={batch.id}>
+                        <td className="batch-id">{batch.id}</td>
+                        <td>{batch.crop}</td>
+                        <td>{batch.farmer}</td>
+                        <td>{batch.quantity}</td>
+                        <td><span className="badge">{batch.status}</span></td>
+                        <td>
+                          {batch.status === "In Transit to Retailer" ? (
+                            <button
+                              className="primary-button"
+                              onClick={() => receiveAtRetailer(batch.id)}
+                            >
+                              Confirm Receipt
+                            </button>
+                          ) : batch.status === "Received at Retailer" ? (
+                            <button
+                              className="primary-button"
+                              onClick={() => deliverToConsumer(batch.id)}
+                            >
+                              Confirm Delivery
+                            </button>
+                          ) : (
+                            <span>Waiting / Completed</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </section>
           </>
@@ -579,107 +939,151 @@ function App() {
             <div className="tracking-search">
               <input
                 className="search-input"
-                placeholder="Example: RICE-001"
+                placeholder="Example: RICE-005"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
 
-            {search.trim() !== "" && (() => {
-              const batch = batches.find(
-                b => b.id.toLowerCase() === search.trim().toLowerCase()
-              );
-
-              if (!batch) {
-                return (
+            {search.trim() !== "" && (
+              <>
+                {trackingLoading && (
                   <p className="empty-message">
-                    No batch found. Please check your Batch ID.
+                    Fetching batch information from blockchain...
                   </p>
-                );
-              }
+                )}
 
-              const stages = [
-                {
-                  name: "Farmer Registration",
-                  detail: `${batch.farmer} · ${batch.location}`,
-                  done: true,
-                },
-                {
-                  name: "Collection Centre",
-                  detail: "Crop received and inspected",
-                  done: ["Received", "In Transit", "Delivered"].includes(batch.status),
-                },
-                {
-                  name: "Distributor",
-                  detail: "Shipment dispatched",
-                  done: ["In Transit", "Delivered"].includes(batch.status),
-                },
-                {
-                  name: "Retailer",
-                  detail: "Product delivered to retailer",
-                  done: batch.status === "Delivered",
-                },
-              ];
+                {!trackingLoading && trackingError && (
+                  <p className="empty-message">{trackingError}</p>
+                )}
 
-              return (
-                <div className="tracking-result">
-                  <div className="tracking-header">
-                    <div>
-                      <h2>{batch.crop}</h2>
-                      <p>Batch ID: {batch.id}</p>
+                {!trackingLoading && trackedBatch && (
+                  <div className="tracking-result">
+                    <div className="tracking-header">
+                      <div>
+                        <h2>{trackedBatch.crop}</h2>
+                        <p>Batch ID: {trackedBatch.id}</p>
+                      </div>
+
+                      <span
+                        className={`badge ${
+                          [
+                            "registered",
+                            "received-at-collection",
+                            "in-transit-to-distributor",
+                            "received-at-distributor",
+                            "in-transit-to-retailer",
+                            "received-at-retailer",
+                            "delivered-to-consumer",
+                          ][trackedBatch.status]
+                        }`}
+                      >
+                        {
+                          [
+                            "Registered",
+                            "Received at Collection",
+                            "In Transit to Distributor",
+                            "Received at Distributor",
+                            "In Transit to Retailer",
+                            "Received at Retailer",
+                            "Delivered to Consumer",
+                          ][trackedBatch.status]
+                        }
+                      </span>
                     </div>
 
-                    <span className={`badge ${batch.status.toLowerCase().replace(" ", "-")}`}>
-                      {batch.status}
-                    </span>
-                  </div>
-
-                  <div className="product-details">
-                    <div><small>Farmer</small><strong>{batch.farmer}</strong></div>
-                    <div><small>Quantity</small><strong>{batch.quantity}</strong></div>
-                    <div><small>Origin</small><strong>{batch.location}</strong></div>
-                  </div>
-
-                  <div className="qr-section">
-                    <div>
-                      <h3>Product QR Code</h3>
-                      <p>Scan to view this batch's supply chain journey.</p>
+                    <div className="product-details">
+                      <div>
+                        <small>Farmer</small>
+                        <strong>{trackedBatch.farmer}</strong>
+                      </div>
+                      <div>
+                        <small>Quantity</small>
+                        <strong>{trackedBatch.quantity}</strong>
+                      </div>
+                      <div>
+                        <small>Origin</small>
+                        <strong>{trackedBatch.location}</strong>
+                      </div>
                     </div>
 
-                    <div className="qr-container">
-                      <QRCodeSVG
-                        value={`${window.location.origin}/?batch=${encodeURIComponent(batch.id)}`}
-                        size={180}
-                        level="H"
-                      />
-                      <strong>{batch.id}</strong>
+                    <div className="qr-section">
+                      <div>
+                        <h3>Product QR Code</h3>
+                        <p>Scan to view this batch's supply chain journey.</p>
+                      </div>
+
+                      <div className="qr-container">
+                        <QRCodeSVG
+                          value={`${window.location.origin}/?batch=${encodeURIComponent(
+                            trackedBatch.id
+                          )}`}
+                          size={180}
+                          level="H"
+                        />
+                        <strong>{trackedBatch.id}</strong>
+                      </div>
                     </div>
-                  </div>
 
-                  <h3>Supply Chain Journey</h3>
+                    <h3>Supply Chain Journey</h3>
 
-                  <div className="tracking-timeline">
-                    {stages.map((stage, index) => (
-                      <div className="timeline-item" key={stage.name}>
-                        <div className={`timeline-marker ${stage.done ? "completed" : ""}`}>
-                          {stage.done ? "✓" : index + 1}
-                        </div>
+                    <div className="tracking-timeline">
+                      <div className="timeline-item">
+                        <div className="timeline-marker completed">✓</div>
                         <div>
-                          <strong>{stage.name}</strong>
-                          <p>{stage.detail}</p>
-                          <small>{stage.done ? "Completed" : "Pending"}</small>
+                          <strong>Farmer Registration</strong>
+                          <p>
+                            {trackedBatch.farmer} · {trackedBatch.location}
+                          </p>
+                          <small>Registered on blockchain</small>
                         </div>
                       </div>
-                    ))}
-                  </div>
 
-                  <p className="verification-note">
-                    This tracking information is currently retrieved from
-                    the application's demonstration data.
-                  </p>
-                </div>
-              );
-            })()}
+                      {trackingHistory.map((event, index) => {
+                        const statusNames = [
+                          "Registered",
+                          "Received at Collection Centre",
+                          "In Transit to Distributor",
+                          "Received at Distributor",
+                          "In Transit to Retailer",
+                          "Received at Retailer",
+                          "Delivered to Consumer",
+                        ];
+
+                        return (
+                          <div
+                            className="timeline-item"
+                            key={`${event.transactionHash}-${index}`}
+                          >
+                            <div className="timeline-marker completed">✓</div>
+                            <div>
+                              <strong>{statusNames[event.status]}</strong>
+                              <p>
+                                {new Date(
+                                  event.timestamp * 1000
+                                ).toLocaleString()}
+                              </p>
+                              <small>Confirmed on blockchain</small>
+                              <p>
+                                <small>
+                                  Transaction: {event.transactionHash.slice(0, 12)}...
+                                </small>
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <p className="verification-note">
+                      This tracking history is retrieved from blockchain
+                      transactions. Each recorded status update has a
+                      corresponding transaction.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </section>
         )}
 
