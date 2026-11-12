@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 
 function App() {
   const [activePage, setActivePage] = useState("Dashboard");
   const [showForm, setShowForm] = useState(false);
-  const [search, setSearch] = useState("");
+ const [search, setSearch] = useState(
+  () => new URLSearchParams(window.location.search).get("batch") || ""
+);
 
   const [farmers, setFarmers] = useState([
     {
@@ -635,6 +638,22 @@ function App() {
                     <div><small>Farmer</small><strong>{batch.farmer}</strong></div>
                     <div><small>Quantity</small><strong>{batch.quantity}</strong></div>
                     <div><small>Origin</small><strong>{batch.location}</strong></div>
+                  </div>
+
+                  <div className="qr-section">
+                    <div>
+                      <h3>Product QR Code</h3>
+                      <p>Scan to view this batch's supply chain journey.</p>
+                    </div>
+
+                    <div className="qr-container">
+                      <QRCodeSVG
+                        value={`${window.location.origin}/?batch=${encodeURIComponent(batch.id)}`}
+                        size={180}
+                        level="H"
+                      />
+                      <strong>{batch.id}</strong>
+                    </div>
                   </div>
 
                   <h3>Supply Chain Journey</h3>
