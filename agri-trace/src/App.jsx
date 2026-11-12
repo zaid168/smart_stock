@@ -47,6 +47,36 @@ function App() {
     },
   ]);
 
+  const [distributors] = useState([
+    {
+      id: "D001",
+      name: "ABC Agro Logistics",
+      location: "Chennai",
+      manager: "Suresh",
+    },
+    {
+      id: "D002",
+      name: "Green Transport",
+      location: "Coimbatore",
+      manager: "Arun",
+    },
+  ]);
+
+  const [retailers] = useState([
+    {
+      id: "R001",
+      name: "Fresh Mart",
+      location: "Chennai",
+      manager: "Rahul",
+    },
+    {
+      id: "R002",
+      name: "Green Grocery",
+      location: "Coimbatore",
+      manager: "Vijay",
+    },
+  ]);
+
   const [farmerForm, setFarmerForm] = useState({
     name: "",
     phone: "",
@@ -123,6 +153,26 @@ function App() {
       batches.map((batch) =>
         batch.id === batchId
           ? { ...batch, status: "Received" }
+          : batch
+      )
+    );
+  }
+
+  function dispatchBatch(batchId) {
+    setBatches(
+      batches.map((batch) =>
+        batch.id === batchId
+          ? { ...batch, status: "In Transit" }
+          : batch
+      )
+    );
+  }
+
+  function confirmDelivery(batchId) {
+    setBatches(
+      batches.map((batch) =>
+        batch.id === batchId
+          ? { ...batch, status: "Delivered" }
           : batch
       )
     );
@@ -479,7 +529,41 @@ function App() {
           </>
         )}
 
-        {!["Dashboard", "Farmers", "Crop Batches", "Collection Centres"].includes(activePage) && (
+        {/* DISTRIBUTOR MANAGEMENT */}
+
+        {activePage === "Distributors" && (
+          <>
+            <section className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-top">
+                  <span>Total Distributors</span>
+                  <span>🚚</span>
+                </div>
+                <h2>{distributors.length}</h2>
+                <p>Registered distributors</p>
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* RETAILER MANAGEMENT */}
+
+        {activePage === "Retailers" && (
+          <>
+            <section className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-top">
+                  <span>Total Retailers</span>
+                  <span>🏪</span>
+                </div>
+                <h2>{retailers.length}</h2>
+                <p>Registered retailers</p>
+              </div>
+            </section>
+          </>
+        )}
+
+        {!["Dashboard", "Farmers", "Crop Batches", "Collection Centres", "Distributors", "Retailers"].includes(activePage) && (
           <section className="content-card placeholder">
             <h2>{activePage}</h2>
             <p>This module will be implemented next.</p>

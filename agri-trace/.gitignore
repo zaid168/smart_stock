@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# React dependencies
+node_modules/
+
+# Build files
+dist/
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
